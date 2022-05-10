@@ -256,4 +256,36 @@ class URLRoutingTests: XCTestCase {
       )
     )
   }
+
+  func testAuthorizedClient() async throws {
+    enum AppRoute: Equatable {
+      case `public`
+      case `private`(Authorized<PrivateRoute>)
+    }
+    enum PrivateRoute: Equatable {
+      case account
+    }
+
+    let client = URLRoutingClient<AppRoute>.failing
+      .override(
+        .private(.init(authorization: .bearer("deadbeef"), route: .account)),
+        with: { try .ok("it worked") }
+      )
+
+    do {
+      _ = try await client
+        .scoped(to: AppRoute.private)
+        .request(.account, as: String.self)
+      XCTFail("Request should not be authorized")
+    } catch {
+      XCTAssert(error is UnauthorizedRoute)
+    }
+
+    let result = try await client
+      .overrideAuthorization { .bearer("deadbeef") }
+      .scoped(to: AppRoute.private)
+      .request(.account, as: String.self)
+
+    XCTAssertEqual("it worked", result.value)
+  }
 }

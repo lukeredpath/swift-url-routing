@@ -3,7 +3,7 @@ import Foundation
 import Parsing
 
 /// Represents a way of authorizing a URL request.
-public enum Authorization {
+public enum Authorization: Equatable {
   /// Request is authorized using a bearer token in the "authorization" header.
   case bearer(String)
 
@@ -69,6 +69,8 @@ public struct Authorized<Route> {
   }
 }
 
+extension Authorized: Equatable where Route: Equatable {}
+
 public struct Authorize<Parsers: ParserPrinter>: ParserPrinter where Parsers.Input == URLRequestData {
   @usableFromInline
   let parsers: Parsers
@@ -106,6 +108,38 @@ public struct Authorize<Parsers: ParserPrinter>: ParserPrinter where Parsers.Inp
   }
 }
 
-extension URLRoutingClient {
+public struct UnauthorizedRoute: Error {
+  init() {}
+}
 
+extension URLRoutingClient {
+  /// Returns a client that is scoped to perform authorized local routes.
+  ///
+  /// The returned client will automatically construct `Authorized` routes using the current authorization
+  /// by calling `self.authorization()` - if this returns `nil` a `UnuthorizedRoute` error will
+  /// be thrown.
+  ///
+  /// - Parameters:
+  ///   - toRoute: A function that converts an authorized local route back to a more global route.
+  public func scoped<LocalRoute>(
+    to toRoute: @escaping (Authorized<LocalRoute>) -> Route
+  ) -> URLRoutingClient<LocalRoute> {
+    .init(
+      request: { localRoute in
+        guard let authorization = self.authorization() else {
+          throw UnauthorizedRoute()
+        }
+        return try await self.request(
+          toRoute(
+            .init(
+              authorization: authorization,
+              route: localRoute
+            )
+          )
+        )
+      },
+      authorization: self.authorization,
+      setAuthorization: self.setAuthorization
+    )
+  }
 }
