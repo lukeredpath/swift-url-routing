@@ -1,3 +1,4 @@
+import CasePaths
 import Parsing
 import URLRouting
 import XCTest
@@ -164,6 +165,95 @@ class URLRoutingTests: XCTestCase {
           .baseURL("http://localhost:8080/v1?token=deadbeef")
           .print(.episodes)
       )?.url?.absoluteString
+    )
+  }
+
+  func testAuthorization() throws {
+    enum AppRoute {
+      case `public`(PublicRoute)
+      case `private`(Authorized<PrivateRoute>)
+    }
+
+    enum PublicRoute {
+      case signup
+    }
+
+    enum PrivateRoute {
+      case account
+    }
+
+    let privateRouter = OneOf {
+      Route(/PrivateRoute.account) {
+        Path { "account" }
+      }
+    }
+
+    let router = OneOf {
+      Route(/AppRoute.public) {
+        OneOf {
+          Route(PublicRoute.signup) {
+            Path { "signup" }
+          }
+        }
+      }
+      Route(/AppRoute.private) {
+        // For this test we'll support all types of
+        // authorization methods.
+        OneOf {
+          Authorize(with: .bearer) {
+            privateRouter
+          }
+          Authorize(with: .query("token")) {
+            privateRouter
+          }
+          Authorize(with: .custom("X-API-Token")) {
+            privateRouter
+          }
+        }
+      }
+    }
+
+    XCTAssertEqual(
+      URLRequestData(
+        path: "/account",
+        headers: ["Authorization": ["Bearer deadbeef"]]
+      ),
+      try router.print(
+        AppRoute.private(
+          .init(
+            authorization: .bearer("deadbeef"),
+            route: .account
+          )
+        )
+      )
+    )
+    XCTAssertEqual(
+      URLRequestData(
+        path: "/account",
+        headers: ["X-API-Token": ["deadbeef"]]
+      ),
+      try router.print(
+        AppRoute.private(
+          .init(
+            authorization: .custom("deadbeef"),
+            route: .account
+          )
+        )
+      )
+    )
+    XCTAssertEqual(
+      URLRequestData(
+        path: "/account",
+        query: ["token": ["deadbeef"]]
+      ),
+      try router.print(
+        AppRoute.private(
+          .init(
+            authorization: .query("deadbeef"),
+            route: .account
+          )
+        )
+      )
     )
   }
 }
